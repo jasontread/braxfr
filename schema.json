@@ -1,0 +1,42 @@
+[
+  {
+    "name": "domain",
+    "mode": "required",
+    "type": "string"
+  },
+  {
+    "name": "name",
+    "mode": "required",
+    "type": "string"
+  },
+  {
+    "name": "ttl",
+    "mode": "required",
+    "type": "integer"
+  },
+  {
+    "name": "type",
+    "mode": "required",
+    "type": "string"
+  },
+  {
+    "name": "data",
+    "mode": "required",
+    "type": "string"
+  },
+  {
+    "name": "rank",
+    "mode": "required",
+    "type": "integer"
+  },
+  {
+    "name": "client_continent",
+    "mode": "required",
+    "type": "string"
+  },
+  {
+    "name": "endpoint_continent",
+    "mode": "nullable",
+    "type": "string"
+  }
+]

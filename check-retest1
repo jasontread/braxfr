@@ -1,0 +1,8 @@
+#!/bin/bash
+for file in results/*; do
+  lines=$(cat $file | wc -l)
+  cat $file | grep braxfr
+  if [ $lines -eq 0 ]; then
+    echo $file
+  fi
+done

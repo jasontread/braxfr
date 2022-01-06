@@ -1,0 +1,26 @@
+#!/bin/bash
+IFS=,
+ptr=0
+#file=top-1m.csv
+file=domains-retest.csv
+lines=$(cat $file | wc -l)
+mapfile -t hosts < hosts.txt 
+while true; do
+  for (( i=0; i<${#hosts[@]}; i++ )); do
+    host=(${hosts[$i]})
+    domain=$(head -${ptr} $file | tail -1)
+    domain=($domain) 
+    ptr=$((ptr+1))
+#    if [ -f "results/${domain[1]}.csv" ]; then
+#      i=$((i-1))
+#      continue
+#    fi 
+    (timeout 120 ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no ${host[0]} "~/braxfr --csv --csv-add-domain --csv-no-header -d dnspop-1k --meta-col-vals=${domain[0]},${host[1]} -y BR_A ${domain[1]}" 1>results/${domain[1]}.csv 2>/dev/null </dev/null; ./append-geo.php results/${domain[1]}.csv) & 
+  done
+  wait
+  date
+  echo "Finished $ptr of $lines"
+  if [ $ptr -gt $lines ]; then
+    break
+  fi
+done

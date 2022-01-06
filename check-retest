@@ -1,0 +1,13 @@
+#!/bin/bash
+for file in results/*; do
+  lines=$(cat $file | wc -l)
+  cat $file | grep braxfr
+  no_braxfr=$?
+  cols=$(head -n1 $file | grep -o "," | wc -l)
+  if [ $no_braxfr -eq 0 ] || [ $lines -eq 0 ] || [ $lines -gt 100 ] || [ $cols -eq 6 ]; then
+    bname=$(basename $file)
+    cat domains.csv | grep ${bname/.csv/} | head -1
+    #echo $file
+    #rm -f $file
+  fi
+done

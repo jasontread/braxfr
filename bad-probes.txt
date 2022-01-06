@@ -1,0 +1,6 @@
+london.citycloud.cloudharmony.net
+buffalo.citycloud.cloudharmony.net
+las-vegas.virtustream.cloudharmony.net
+oktawave.cloudharmony.net
+chicago.vps.net.cloudharmony.net
+los-angeles.citycloud.cloudharmony.net

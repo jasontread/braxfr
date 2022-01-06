@@ -1,0 +1,6 @@
+#!/bin/bash
+while read host; do
+  echo $host
+  scp -p -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no braxfr $host:~/ 2>/dev/null
+  #scp -rp -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no dnspop $host:~/ 2>/dev/null
+done <probes.txt

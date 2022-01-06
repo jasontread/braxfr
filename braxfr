@@ -1,0 +1,1137 @@
+#!/bin/bash
+
+# Default runtime settings
+BATCH_SIZE=10
+CONCURRENCY=[cpus]*10
+CSV_INDEX=
+CSV=0
+CSV_ADD_DOMAIN=0
+CSV_NO_HEADER=0
+DEFAULT_TTL=1h
+DOMAIN=
+DOMAIN_LIMIT=1000000
+DOMAIN_OFFSET=0
+DICTIONARY=www
+DICTIONARY_LIMIT=1000000
+META_COLS=
+META_COL_VALS=
+NAME_SERVERS=SOA
+NS_PER_QUERY=3
+MAX_NS_CONS=1
+NO_CHECK_HOSTNAMES=0
+NO_WILDCARD_CHECK=
+OUTPUT=stdout
+PATH_TO_DIG=dig
+RR_TYPES=SOA,NS,MX,TXT,A,AAAA,BR_A
+SKIP_TTL=0
+TCP=0
+VERBOSE=0
+WAIT=3
+WC_QUERIES=3
+WILDCARD_24=0
+
+
+# Extract user arguments
+while test $# -gt 0; do
+  case "$1" in
+    -h|--help)
+      echo " "
+      echo " 'braxfr' attempts to simulate a zone transfer for DOMAIN without use of AXFR."
+      echo " It uses dig and a brute force dictionary to discover resource records and "
+      echo " construct a zone file. Although accuracy is not 100% guaranteed, braxfr will"
+      echo " generally discover a significant number of resource records associated with"
+      echo " DOMAIN. braxfr performance is dependent on network capacity where it is run,"
+      echo " concurrency, and resolve response time. An attempt will be made to discover and"
+      echo " exclude wildcard records (listed as a single record * IN A...)"
+      echo " "
+      echo " Each DOMAIN value may be either a domain, or the path to a file containing a"
+      echo " list of domains (one per line)"
+      echo " "
+      echo " braxfr [options] DOMAIN1 DOMAIN2 DOMAIN3 ... DOMAINN"
+      echo " "
+      echo " options:"
+      echo "  -b, --batch-size=BATCH_SIZE   # of queries to batch when invoking dig - default"
+      echo "                                is 10"
+      echo "                                "
+      echo "  -c, --concurrency=CONCURRENCY Max DNS query concurrency. May be an mathmatical"
+      echo "                                expression containing the token [cpus]. For"
+      echo "                                example --concurrency='[cpus]*10' in an 8 core"
+      echo "                                environment translates to 8*10=80 or"
+      echo "                                --concurrency=80. Actual concurrency will not"
+      echo "                                exceed the # of words in DICTIONARY or the "
+      echo "                                optional DICTIONARY_LIMIT value. Additionally,"
+      echo "                                actual concurrency will not exceed the number of"
+      echo "                                NAME_SERVERS specified * MAX_NS_CONS. Default"
+      echo "                                CONCURRENCY is '[cpus]*10'"      
+      echo "                                "
+      echo "  --csv                         Record results in CSV instead of DNS Zone file"
+      echo "                                format. CSV files have the following columns:"
+      echo "                                Name,TTL,Record Type,Record Data"
+      echo "                                and the first row is a header"
+      echo "                                "
+      echo "  --csv-add-domain              If set in conjunction with --csv, then Domain"
+      echo "                                will be added as the first column in the CSV"
+      echo "                                output"
+      echo "                                "
+      echo "  --csv-no-header               Don't include a header row in CSV output"
+      echo "                                "
+      echo "  --default-ttl                 Default domain TTL to use when --skip-ttl is"
+      echo "                                set. Default is 1h"
+      echo "                                "
+      echo "  -d, --dictionary=DICTIONARY   Brute force dictionary - a list of words to"
+      echo "                                query to 'discover' zone resource records. This"
+      echo "                                argument may either be a comma separate list of"
+      echo "                                words or the path to a file containing words"
+      echo "                                (line separated). This repository includes a"
+      echo "                                dnspop submodule with some pre-made brute force"
+      echo "                                dictionaries based on Rapid7's Project Sonar"
+      echo "                                Forward DNS data set. These dictionaries can be"
+      echo "                                referenced using the DICTIONARY values dnspop-1k,"
+      echo "                                dnspop-10k, dnspop-100k and dnspop-1m. See"
+      echo "                                https://github.com/bitquark/dnspop for more"
+      echo "                                information. Default DICTIONARY value is just"
+      echo "                                'www'"
+      echo "                                "
+      echo "  --dig=PATH_TO_DIG             Path to dig utility if not in PATH"
+      echo "                                "
+      echo "  -h, --help                    show braxfr help"
+      echo "                                "
+      echo "  -l, --limit=DICTIONARY_LIMIT  Max # of entries in DICTIONARY to query. For"
+      echo "                                example, if DICTIONARY references a file with"
+      echo "                                1 million words and DICTIONARY_LIMIT is 5000,"
+      echo "                                then only the first 5000 words will be checked."
+      echo "                                The default limit is 1 million words"
+      echo "                                "
+      echo "  --domain-csv-index=CSV_INDEX  If the domain input is a CSV file, this argument"
+      echo "                                may be used to designate the column comaining the"
+      echo "                                domain (first column=0)"
+      echo "                                "
+      echo "  --domain-limit=DOMAIN_LIMIT   Max # of DOMAINS to process - default is 1 million"
+      echo "                                "
+      echo "  --domain-offset=DOMAIN_OFFSET DOMAIN offset - default is 0"
+      echo "                                "
+      echo "  --meta-cols=META_COLS         optional comma separated list of meta column"
+      echo "                                headers to append to the csv header (ignored for"
+      echo "                                non-csv output or if --csv-no-header is set)"
+      echo "                                "
+      echo "  --meta-col-vals=META_COL_VALS optional comma separated list of meta column"
+      echo "                                values to append to each csv row (ignored for"
+      echo "                                non-csv output"
+      echo "                                "
+      echo "  -n, --ns=NAME_SERVERS         Explicit name servers to use for DNS queries."
+      echo "                                Multiple name servers may be specified each"
+      echo "                                separated by a comma. Additionally, this"
+      echo "                                argument may reference a file containing a list"
+      echo "                                (line separated) of name servers to use. The"
+      echo "                                value 'SOA' will be translated to all"
+      echo "                                authoritative name servers assigned to DOMAIN."
+      echo "                                The value 'LOCAL' will be translated to all"
+      echo "                                resolvers listed in /etc/resolv.conf. Default "
+      echo "                                NAME_SERVERS is SOA"
+      echo "                                "
+      echo "  --no-check-hostnames          Don't check for hostnames. Default is to check"
+      echo "                                when a domain contains more than 1 period. For"
+      echo "                                example, if domain was www.yahoo.com, then this"
+      echo "                                hostname would be checked first, followed by"
+      echo "                                yahoo.com. SOA queries are used to check for"
+      echo "                                hostnames"
+      echo "                                "
+      echo "  --no-wildcard                 Don't check for wildcard records. Default is to"
+      echo "                                check for wildcards if the dictionary is >100"
+      echo "                                words"
+      echo "                                "
+      echo "  --ns-per-query=NS_PER_QUERY   Number of name servers to attempt per query. At"
+      echo "                                least 1 server must respond before WAIT. Default"
+      echo "                                is 3. If the number of name servers specified is"
+      echo "                                less than this value, then every name server"
+      echo "                                may be attempted for each query"
+      echo "                                "
+      echo "  -o, --output=OUTPUT           Path to a file where the resulting zone file/csv"
+      echo "                                should be written. If not specified, results"
+      echo "                                will be written to stdout. If multiple DOMAINS"
+      echo "                                specified, this argument may contain the string"
+      echo "                                [domain] which will be replaced with the domain"
+      echo "                                value. e.g. --output=[domain]-zonfile with"
+      echo "                                DOMAIN=yahoo.com would result in an output file"
+      echo "                                named 'yahoo.com-zonefile"
+      echo "                                "
+      echo "  --skip-ttl                    Skip SOA query for global TTL - which is a"
+      echo "                                blocking operation that can thus slow down the"
+      echo "                                process. If CSV is set, TTL is automatically"
+      echo "                                skipped"
+      echo "                                "
+      echo "  -t, --tcp                     Invoke TCP/IP DNS queries only (i.e. 'dig +tcp')"
+      echo "                                "
+      echo "  -v, --verbose                 Show verbose output to stderr"
+      echo "                                "
+      echo "  -w, --wait=WAIT               Timeout for DNS queries in seconds - default 2"
+      echo "                                Name servers that time out consecutively will be"
+      echo "                                blacklisted from additional queries"
+      echo "                                "
+      echo "  --wildcard-24                 Apply IPv4 wildcard matches using a /24 CIDR (e.g."
+      echo "                                a wildcard test resulting in 192.168.1.233 will"
+      echo "                                match any IP address in 192.168.1.0/24"
+      echo "                                "
+      echo "  --wildcard-queries=WC_QUERIES The number of queries to perform when checking "
+      echo "                                for wildcard records - default is 3"
+      echo "                                "
+      echo "  -x, --max-ns-cons=MAX_NS_CONS Max concurrent queries for each NAME_SERVER. For"
+      echo "                                example, if MAX_NS_CONS=2, DICTIONARY contains"
+      echo "                                4k words, NAME_SERVERS defined 1k servers, and"
+      echo "                                CONCURRENCY>=2000, then brute force queries"
+      echo "                                would be completed in 2 iterations, each for 2k"
+      echo "                                words. Default MAX_NS_CONS is 1. NOTE: this arg"
+      echo "                                is ignored for non brute-force records which are"
+      echo "                                queried in a single concurrent batch using all"
+      echo "                                available name servers"
+      echo "                                "
+      echo "  -y, --rr-types=RR_TYPES       Type of DNS resource records to include in"
+      echo "                                resource discovery. For a full list of DNS"
+      echo "                                record types, see"
+      echo "                                https://en.wikipedia.org/wiki/List_of_DNS_record_types"
+      echo "                                Record types prefixed with 'BR_' will be included"
+      echo "                                in brute force queries. Multiple record types"
+      echo "                                may be specified, each separated by a comma."
+      echo "                                Additionally, this argument may reference a file"
+      echo "                                containing a line separated list of record types."
+      echo "                                The default RR_TYPES value is as follows:"
+      echo "                                SOA,NS,MX,TXT,A,AAAA,BR_A"
+      echo "                                NOTE: BR_A will capture both A and CNAME records"
+      echo "                                including full CNAME recursion - thus it is"
+      echo "                                redundant to specify both"
+      echo "                                "
+      echo " "
+      exit 0
+      ;;
+    -b)
+      shift
+      BATCH_SIZE=$1
+      shift
+      ;;
+    --batch-size*)
+      BATCH_SIZE=`echo $1 | sed -e 's/^[^=]*=//g'`
+      shift
+      ;;
+    -c)
+      shift
+      CONCURRENCY=$1
+      shift
+      ;;
+    --concurrency*)
+      CONCURRENCY=`echo $1 | sed -e 's/^[^=]*=//g'`
+      shift
+      ;;
+    --csv)
+      shift
+      CSV=1
+      ;;
+    --csv-add-domain)
+      shift
+      CSV_ADD_DOMAIN=1
+      ;;
+    --csv-no-header)
+      shift
+      CSV_NO_HEADER=1
+      ;;
+    --default-ttl*)
+      DEFAULT_TTL=`echo $1 | sed -e 's/^[^=]*=//g'`
+      shift
+      ;;
+    -d)
+      shift
+      DICTIONARY=$1
+      shift
+      ;;
+    --dictionary*)
+      DICTIONARY=`echo $1 | sed -e 's/^[^=]*=//g'`
+      shift
+      ;;
+    --dig*)
+      PATH_TO_DIG=`echo $1 | sed -e 's/^[^=]*=//g'`
+      shift
+      ;;
+    -l)
+      shift
+      DICTIONARY_LIMIT=$1
+      shift
+      ;;
+    --limit*)
+      DICTIONARY_LIMIT=`echo $1 | sed -e 's/^[^=]*=//g'`
+      shift
+      ;;
+    --domain-csv-index*)
+      CSV_INDEX=`echo $1 | sed -e 's/^[^=]*=//g'`
+      shift
+      ;;
+    --domain-limit*)
+      DOMAIN_LIMIT=`echo $1 | sed -e 's/^[^=]*=//g'`
+      shift
+      ;;
+    --domain-offset*)
+      DOMAIN_OFFSET=`echo $1 | sed -e 's/^[^=]*=//g'`
+      shift
+      ;;
+    --meta-col-vals*)
+      META_COL_VALS=`echo $1 | sed -e 's/^[^=]*=//g'`
+      shift
+      ;;
+    --meta-cols*)
+      META_COLS=`echo $1 | sed -e 's/^[^=]*=//g'`
+      shift
+      ;;
+    -n)
+      shift
+      NAME_SERVERS=$1
+      shift
+      ;;
+    --no-check-hostnames)
+      shift
+      NO_CHECK_HOSTNAMES=1
+      ;;
+    --no-wildcard)
+      shift
+      NO_WILDCARD_CHECK=1
+      ;;
+    --wildcard-24)
+      shift
+      WILDCARD_24=1
+      ;;
+    --wildcard-queries*)
+      WC_QUERIES=`echo $1 | sed -e 's/^[^=]*=//g'`
+      shift
+      ;;
+    --ns-per-query*)
+      NS_PER_QUERY=`echo $1 | sed -e 's/^[^=]*=//g'`
+      shift
+      ;;
+    --ns*)
+      NAME_SERVERS=`echo $1 | sed -e 's/^[^=]*=//g'`
+      shift
+      ;;
+    -o)
+      shift
+      OUTPUT=$1
+      shift
+      ;;
+    --output*)
+      OUTPUT=`echo $1 | sed -e 's/^[^=]*=//g'`
+      shift
+      ;;
+    --skip-ttl)
+      shift
+      SKIP_TTL=1
+      ;;
+    -t|--tcp)
+      shift
+      TCP=1
+      ;;
+    -v|--verbose)
+      shift
+      VERBOSE=1
+      ;;
+    -w)
+      shift
+      WAIT=$1
+      shift
+      ;;
+    --wait*)
+      WAIT=`echo $1 | sed -e 's/^[^=]*=//g'`
+      shift
+      ;;
+    -x)
+      shift
+      MAX_NS_CONS=$1
+      shift
+      ;;
+    --max-ns-cons*)
+      MAX_NS_CONS=`echo $1 | sed -e 's/^[^=]*=//g'`
+      shift
+      ;;
+    -y)
+      shift
+      RR_TYPES=$1
+      shift
+      ;;
+    --rr-types*)
+      RR_TYPES=`echo $1 | sed -e 's/^[^=]*=//g'`
+      shift
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+
+# Populate domains array
+DOMAINS=()
+while true; do
+  if ! [ -z $1 ] && [ "$1" != "" ]; then
+    if ! [ -f "$1" ] && ! [[ "$1" =~ ^.*\..*$ ]]; then
+      >&2 echo "Invalid domain $1"
+      exit 1
+    else
+      DOMAINS+=($1)
+      shift
+    fi
+  else
+    break
+  fi
+done
+
+# Internal variables
+
+# Script directory
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
+# Timeout command
+TIMEOUT=
+which timeout &>/dev/null
+if [ $? -eq 0 ]; then
+  TIMEOUT="timeout $WAIT"
+else
+  which gtimeout &>/dev/null
+  if [ $? -eq 0 ]; then
+    TIMEOUT="gtimeout $WAIT"
+  fi
+fi
+
+# Name server pointer and count
+ns_ptr=0
+ns_count=0
+
+# Converts a concurrency string to a numeric value by substituting [cpus] with
+# the corresponding # of CPUs present in the environment and evaluating any 
+# mathmatical expressions
+function get_concurrency() {
+  concurrency=
+  if ! [ -z $1 ]; then
+    concurrency=$((${1/\[cpus\]/$(getconf _NPROCESSORS_ONLN)}))
+  fi
+  echo $concurrency
+}
+
+# Generates a temporary dictionary file if $DICTIONARY is a comma separated
+# list of words - otherwise returns the value of $DICTIONARY
+function get_dictionary() {
+  dictionary=
+  if ! [ -z $1 ]; then
+    dictionary=$1
+    # Generate temporary dictionary file from csv command line args
+    if ! [ -f $dictionary ] && ! [[ $dictionary =~ ^.*/.*$ ]]; then
+      if [ $dictionary = "dnspop-1k" ] || [ $dictionary = "dnspop-10k" ] || [ $dictionary = "dnspop-100k" ] || [ $dictionary = "dnspop-1m" ]; then
+        filter=$DIR/dnspop/results/bitquark_*_subdomains_popular_1000
+        if [ $dictionary = "dnspop-10k" ]; then
+          filter="${filter}0"
+        elif [ $dictionary = "dnspop-100k" ]; then
+          filter="${filter}00"
+        elif [ $dictionary = "dnspop-1m" ]; then
+          filter="${filter}000"
+        fi
+        dfile=`ls $filter`
+        if [ $? -eq 0 ]; then
+          dictionary=$dfile
+        else
+          >&2 echo "Unable to locate DNSpop dictionary $dictionary using $filter - is DNSpop present?"
+          exit 1
+        fi
+      else
+        dfile=/tmp/braxfr_$RANDOM
+        for word in ${dictionary//,/ }; do
+          echo $word >>$dfile
+        done
+        dictionary=$dfile
+      fi
+    fi
+  fi
+  echo $dictionary
+}
+
+# Writes a line to the output destination. This function uses the following
+# arguments
+# $1) Line to output
+# $2) Domain
+# $3) If 1, will not be printed if CSV==1
+# $4) If 1, then subdomain will be replaced with wildcard
+wildcard_a=()
+wildcard_aaaa=()
+wildcard_cname=()
+wildcard_index=()
+output_buffer=()
+output_buffer_ptr=-1
+output_buffer_max=10
+function print_to_output() {
+  local line=
+  wc_a=
+  wc_aaaa=
+  index_count=${#wildcard_index[@]}
+  for ((i = 0; i < $index_count; ++i)); do
+    if [ $2 = ${wildcard_index[$i]} ]; then
+      wc_a=${wildcard_a[$i]}
+      wc_aaaa=${wildcard_aaaa[$i]}
+      wc_cname=${wildcard_cname[$i]}
+      break
+    fi
+  done
+  while IFS= read -r line ; do
+    if ! [ -z "$line" ] && [ $CSV -eq 1 ]; then
+      if [[ $line =~ ^([^[:blank:]]*)[[:blank:]]*([0-9]*)[[:blank:]]+[inIN]{2}[[:blank:]]+([^[:blank:]]+)[[:blank:]]*(.*)$ ]]; then
+        if [ $CSV_ADD_DOMAIN -eq 1 ]; then
+          line="$2,"
+        else
+          line=""
+        fi
+        line="${line}${BASH_REMATCH[1]},${BASH_REMATCH[2]},${BASH_REMATCH[3]},${BASH_REMATCH[4]}"
+        if ! [ -z $META_COL_VALS ]; then
+          line="${line},${META_COL_VALS}"
+        fi
+      else
+        >&2 echo "Unable to parse line for CSV output: $line"
+        line=
+      fi
+    fi
+    if [ "$line" != "" ] && [ "${line:0:1}" != ';' ]; then
+      # Wildcard records
+      if ! [ -z $4 ] && [ $4 -eq 1 ] && [[ "$line" =~ (brxfr[0-9]+)\. ]]; then
+        line=${line/${BASH_REMATCH[1]}/*}
+      elif [ -z $4 ] || [ $4 -ne 1 ]; then
+        if [ "$wc_a" != "" ]; then
+          skip=0
+          for check in $wc_a; do
+            if [[ "$line" =~ [,[:space:]]+A[,[:space:]]+${check//./\\.} ]]; then
+              skip=1
+              break
+            fi
+          done
+          if [ $skip -eq 1 ]; then
+            print_verbose "Skipping A wildcard record $line"
+            continue
+          fi
+        fi
+        if [ "$wc_aaaa" != "" ]; then
+          skip=0
+          for check in $wc_aaaa; do
+            if [[ "$line" =~ [,[:space:]]+AAAA[,[:space:]]+${check//./\\.} ]]; then
+              skip=1
+              break
+            fi
+          done
+          if [ $skip -eq 1 ]; then
+            print_verbose "Skipping AAAA wildcard record $line"
+            continue
+          fi
+        fi
+        if [ "$wc_cname" != "" ]; then
+          skip=0
+          for check in $wc_cname; do
+            if [[ "$line" =~ [,[:space:]]+[CD]NAME[,[:space:]]+${check//./\\.} ]]; then
+              skip=1
+              break
+            fi
+          done
+          if [ $skip -eq 1 ]; then
+            print_verbose "Skipping CNAME wildcard record $line"
+            break
+          fi
+        fi
+      fi
+      
+      # Check if for duplicate output
+      is_duplicate=0
+      for l in "${output_buffer[@]}"; do
+        if [ "$l" = "$line" ]; then
+          is_duplicate=1
+          break
+        fi
+      done
+      if [ $is_duplicate -eq 1 ]; then
+        print_verbose "Skipping duplicate output $line"
+        continue
+      fi
+      output_buffer_ptr=$((output_buffer_ptr+1))
+      if [ $output_buffer_ptr -ge $output_buffer_max ]; then
+        output_buffer_ptr=0
+      fi
+      output_buffer[$output_buffer_ptr]="$line"
+      
+      if [ $CSV -eq 0 ] || [ -z $3 ] || [ $3 -eq 0 ]; then
+        if [ $OUTPUT = "stdout" ]; then
+          echo $line
+        else
+          echo $line >>$OUTPUT
+        fi
+      fi
+    fi
+  done <<< "$1"
+}
+
+# Prints verbose output if applicable. This function uses the following arguments:
+# $1) Message
+function print_verbose() {
+  if [ $VERBOSE -eq 1 ]; then
+    >&2 echo $1
+  fi
+}
+
+# Executes dig based on the following arguments
+# $1) target + type (e.g. "mydomain.com A") - may be repeated for batch mode
+# $2) set to 1 for +short (otherwise +noall +answer will be assumed)
+# $3) set to 1 to only use non SOA name servers
+# Returns the dig output. Exit with status code 1 on error
+function dig_cmd() {
+  if [ $ns_ptr -ge $ns_count ]; then
+    ns_ptr=0
+  fi
+  
+  local ns=
+  for i in `seq 1 $NS_PER_QUERY`; do
+    local ptr=$(( $ns_ptr + $i - 1 ))
+    if [ $ptr -ge $ns_count ]; then
+      ptr=$(( $i - 1 ))
+      if [ $ptr -ge $ns_count ]; then
+        ptr=0
+      fi
+    fi
+    if [ -z $3 ] || [ $3 -eq 0 ] && [ "${domain_name_servers[$ptr]}" != "" ]; then
+      ns="$ns @${domain_name_servers[$ptr]}"
+    elif [ "${name_servers[$ptr]}" != "" ]; then
+      ns="$ns @${name_servers[$ptr]}"
+    fi
+  done
+  if [ -z $2 ] || [ $2 -eq 0 ]; then
+    opts='+noall +answer'
+  else
+    opts='+short'
+  fi
+  if [ $TCP -eq 1 ]; then
+    opts="$opts +tcp"
+  fi
+  opts="$opts +time=$WAIT"
+  
+  local cmd="$TIMEOUT $PATH_TO_DIG $ns $opts $1"
+  if [ $VERBOSE -eq 1 ]; then print_verbose "> $cmd"; fi
+  $cmd 2>/dev/null | while read line; do
+    if [ "$line" != "" ] && [ "${line:0:1}" != ";" ]; then
+      echo $line
+    fi
+  done
+}
+
+
+# Batches DNS lookups per the BATCH_SIZE setting - uses the following arguments:
+# $1) domain
+# $2) type - comma separated for multiple - if blank any pending queries for 
+# domain will be run
+# $3) target - unused for root domain records
+# Results will be printed when batch is run
+dig_batches=()
+dig_batch_index=()
+dig_batch_sizes=()
+function dig_batch() {
+  run=0
+  index=-1
+  index_count=${#dig_batch_index[@]}
+  for ((i = 0; i < $index_count; ++i)); do
+    if [ "$1" = "${dig_batch_index[$i]}" ]; then
+      index=$i
+      break
+    fi
+  done
+  if [ $index -eq -1 ]; then
+    index=$index_count
+    dig_batch_index[$index]=$1
+    dig_batches[$index]=''
+    dig_batch_sizes[$index]=0
+  fi
+  if [ "$2" != "" ]; then
+    for type in ${2//,/ }; do
+      target=$3
+      if [ "$target" != "" ]; then
+        target="$target."
+      fi
+      dig_batches[$index]="${dig_batches[$index]} ${target}${1} $type"
+      dig_batch_sizes[$index]=$(( ${dig_batch_sizes[$index]} + 1 ))
+    done
+  fi
+  
+  if [ ${dig_batch_sizes[$index]} -ge $BATCH_SIZE ] || [ "$2" = "" ]; then
+    if [ ${dig_batch_sizes[$index]} -gt 0 ]; then
+      target="${dig_batches[$index]}"
+      response=$(dig_cmd "$target") && if [ "$response" != "" ]; then print_to_output "$response" $1; fi &
+      ns_ptr=$(increment_ns_ptr)
+      subprocs=$(( $subprocs + 1 ))
+      # wait if sub processes >= CONCURRENCY or connections per name server will be 
+      # > MAX_NS_CONS on the next iteration
+      cons_per_ns=$(( $subprocs/$ns_count + 1 ))
+      if [ $subprocs -ge $concurrency ] || [ $cons_per_ns -gt $max_ns_cons ]; then
+        if [ $VERBOSE -eq 1 ]; then print_verbose "WAIT> concurrency=$concurrency; subprocs=$subprocs; MAX_NS_CONS=$max_ns_cons; ns_count=$ns_count; connections per ns=$cons_per_ns"; fi
+        subprocs=0
+        wait
+      fi
+    fi
+    dig_batches[$index]=''
+    dig_batch_sizes[$index]=0
+  fi
+  retval=$run
+}
+
+# Increments the name server pointer and returns the new pointer value
+function increment_ns_ptr() {
+  ns_ptr=$(( $ns_ptr + 1 ))
+  if [ $ns_ptr -ge $ns_count ]; then
+    ns_ptr=0
+  fi
+  echo $ns_ptr
+}
+
+
+# Validate runtime parameters
+
+# domain
+if [ ${#DOMAINS[@]} -eq 0 ]; then
+  >&2 echo "At least 1 domain is required"
+  exit 1
+fi
+
+# dig
+$PATH_TO_DIG &>/dev/null
+if [ $? -ne 0 ]; then
+  if [ "$PATH_TO_DIG" = "dig" ]; then
+    >&2 echo "dig not found in PATH"
+  else
+    >&2 echo "Invalid dig path --dig=$PATH_TO_DIG"
+  fi
+  exit 1
+fi
+
+# batch size
+batch_size=$(($BATCH_SIZE * 1))
+if [ $batch_size -le 0 ]; then
+  >&2 echo "BATCH_SIZE must be at least 1"
+  exit 1
+fi
+
+# concurrency
+concurrency=$(get_concurrency $CONCURRENCY)
+if [ -z $concurrency ] || [ $concurrency -eq 0 ]; then
+  >&2 echo "Unable to determine concurrency from --concurrency=$CONCURRENCY"
+  exit 1
+fi
+
+# dictionary
+dictionary=$(get_dictionary $DICTIONARY)
+if [ -z $dictionary ] || ! [ -f $dictionary ]; then
+  >&2 echo "Invalid dictionary --dictionary=$DICTIONARY"
+  exit 1
+fi
+
+# dictionary limit
+dictionary_limit=$(($DICTIONARY_LIMIT * 1))
+if [ $dictionary_limit -le 0 ]; then
+  >&2 echo "DICTIONARY_LIMIT must be at least 1"
+  exit 1
+fi
+
+if [ -z $NO_WILDCARD_CHECK ]; then
+  if [ $(cat $dictionary | wc -l) -lt 100 ] || [ $dictionary_limit -lt 100 ]; then
+    NO_WILDCARD_CHECK=1
+  else
+    NO_WILDCARD_CHECK=0
+  fi
+fi
+
+# WC_QUERIES
+wc_queries=$(($WC_QUERIES * 1))
+if [ $wc_queries -le 0 ]; then
+  >&2 echo "--wildcard-queries=$WC_QUERIES is invalid"
+  exit 1
+fi
+
+# NS_PER_QUERY
+ns_per_query=$(($NS_PER_QUERY * 1))
+if [ $ns_per_query -le 0 ]; then
+  >&2 echo "--ns-per-query=$NS_PER_QUERY is invalid"
+  exit 1
+fi
+
+# name servers
+name_servers=()
+add_soa_ns=0
+for ns in ${NAME_SERVERS//,/ }; do
+  ns_lower=$(echo "$ns" | awk '{print tolower($0)}')
+  if [ "$ns_lower" = "local" ]; then
+    while read ns; do
+      if [[ "${ns:11}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        name_servers+=(${ns:11})
+      fi
+    done </etc/resolv.conf
+  elif [ "$ns_lower" = "soa" ]; then
+    add_soa_ns=1
+  elif [ -f "$ns" ]; then
+    name_servers+=(`cat $ns`)
+  else
+    if [ -z $ns ]; then
+      >&2 echo "Invalid name server $ns"
+    else
+      name_servers+=($ns)
+    fi
+  fi
+done
+ns_count=${#name_servers[@]}
+if [ $ns_count -eq 0 ] && [ $add_soa_ns -eq 0 ]; then
+  >&2 echo "Unable to determine name servers from --ns=$NAME_SERVERS"
+  exit 1
+else
+  for ((i = 0; i < $ns_count; ++i)); do
+    ns=${name_servers[$i]}
+    if ! [[ "$ns" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+      if [ "${ns: -1}" = "." ]; then
+        ns=${ns%?}
+      fi
+      ip=$(dig_cmd "$ns A" 1 1)
+      ns_ptr=$(increment_ns_ptr)
+      if [ "$ip" != "" ]; then
+        unset $name_servers[$i]
+        >&2 echo "Unable to determine IP address for name server $ns"
+      else
+        name_servers[$i]=$ip
+      fi
+    fi
+  done
+fi
+
+# Resource record types
+rr_types=()
+rr_br_types=()
+has_a=0
+has_aaaa=0
+for type in ${RR_TYPES//,/ }; do
+  type_lower=$(echo "$type" | awk '{print tolower($0)}')
+  if [ ${type_lower::3} = "br_" ]; then
+    rr_br_types+=(${type:3})
+    if [ ${type_lower:3} = "a" ]; then
+      has_a=1
+    elif [ ${type_lower:3} = "aaaa" ]; then
+      has_aaaa=1
+    fi
+  else
+    rr_types+=($type)
+  fi
+done
+valid_rr_types=(a aaaa afsdb apl caa cdnskey cds cert cname dhcid dlv dnskey ds ipseckey key kx loc mx naptr ns nsec nsec3 nsec3param ptr rrsig rp sig soa srv sshfp ta tkey tlsa tsig txt uri dname)
+validate_types=("${rr_br_types[@]}" "${rr_types[@]}")
+for type in ${validate_types[@]}; do
+  type_lower=$(echo "$type" | awk '{print tolower($0)}')
+  if [[ ! " ${valid_rr_types[@]} " =~ " ${type_lower} " ]]; then
+    >&2 echo "Resource record type $type is invalid"
+    exit 1
+  fi
+done
+rr_types=$(IFS=, ; echo "${rr_types[*]}")
+rr_br_types=$(IFS=, ; echo "${rr_br_types[*]}")
+
+# Wait
+wait=$(($WAIT * 1))
+if [ $wait -eq 0 ]; then
+  >&2 echo "--wait=$WAIT is invalid"
+  exit 1
+fi
+
+# Max name server connections
+max_ns_cons=$(($MAX_NS_CONS * 1))
+if [ $max_ns_cons -eq 0 ]; then
+  >&2 echo "--max-ns-cons=$MAX_NS_CONS is invalid"
+  exit 1
+fi
+
+# Arguments valid
+if [ $VERBOSE -eq 1 ]; then
+  print_verbose "arguments validated - running braxfr using arguments:"
+  print_verbose "CONCURRENCY=$concurrency"
+  print_verbose "CSV=$CSV"
+  print_verbose "CSV_ADD_DOMAIN=$CSV_ADD_DOMAIN"
+  print_verbose "DICTIONARY=$dictionary"
+  print_verbose "DICTIONARY_LIMIT=$DICTIONARY_LIMIT"
+  print_verbose "DOMAIN_LIMIT=$DOMAIN_LIMIT"
+  print_verbose "DOMAIN_OFFSET=$DOMAIN_OFFSET"
+  print_verbose "MAX_NS_CONS=$MAX_NS_CONS"
+  print_verbose "NO_CHECK_HOSTNAMES=$NO_CHECK_HOSTNAMES"
+  print_verbose "NO_WILDCARD_CHECK=$NO_WILDCARD_CHECK"
+  print_verbose "OUTPUT=$OUTPUT"
+  print_verbose "PATH_TO_DIG=$PATH_TO_DIG"
+  print_verbose "TCP=$TCP"
+  print_verbose "VERBOSE=$VERBOSE"
+  print_verbose "WAIT=$WAIT"
+  print_verbose "has_a=$has_a"
+  print_verbose "has_aaaa=$has_aaaa"
+  >&2 echo "DOMAINS=${DOMAINS[@]}"
+  >&2 echo "NAME_SERVERS=${name_servers[@]}"
+  >&2 echo "RR_TYPES=$rr_types"
+  >&2 echo "BR_RR_TYPES=$rr_br_types"
+fi
+
+
+BASE_OUTPUT="$OUTPUT"
+FIRST_DOMAIN=1
+domain_file="/tmp/braxfr_$RANDOM"
+subprocs=0
+domain_counter=0
+for DOMAIN in ${DOMAINS[@]}; do
+  if [ $domain_counter -gt $DOMAIN_LIMIT ]; then
+    print_verbose "--domain-limit $DOMAIN_LIMIT reach - exiting"
+    break
+  fi
+  if ! [ -f $DOMAIN ]; then
+    echo "$DOMAIN" >$domain_file
+    DOMAIN=$domain_file
+  fi
+  
+  while read DOMAIN; do
+    # Check for CSV formatted input
+    if ! [ -z $CSV_INDEX ]; then
+      IFS=',' read -r -a csv_pieces <<< "$DOMAIN"
+      DOMAIN="${csv_pieces[$CSV_INDEX]}"
+    fi
+    
+    domain_counter=$(( $domain_counter + 1 ))
+    if [ $domain_counter -gt $DOMAIN_LIMIT ]; then
+      break
+    elif [ $domain_counter -lt $DOMAIN_OFFSET ]; then
+      continue
+    fi
+    domain_name_servers=("${name_servers[@]}")
+    
+    # Check for hostname and if present - reduce to base domain using SOA 
+    # lookup
+    SOA=
+    
+    if [ $NO_CHECK_HOSTNAMES -eq 0 ]; then
+      IFS='.' read -r -a domain_pieces <<< "$DOMAIN"
+      if [ ${#domain_pieces[@]} -gt 2 ]; then
+        print_verbose "Checking if $DOMAIN is a hostname [${#domain_pieces[@]}]"
+        for ((i = 0; i < ${#domain_pieces[@]} - 1; i++)); do
+          check=
+          for ((n = $i; n < ${#domain_pieces[@]}; n++)); do
+            if [ "$check" != "" ]; then
+              check="${check}."
+            fi
+            check="${check}${domain_pieces[$n]}"
+          done
+          if [ "$check" != "" ]; then 
+            SOA=$(dig_cmd "$check SOA")
+            ns_ptr=$(increment_ns_ptr)
+            if [ "$SOA" != "" ]; then
+              if [ "$check" != "$DOMAIN" ]; then
+                print_verbose "Discovered hostname $DOMAIN - adjusting to base domain $check"
+                DOMAIN=$check
+              fi
+              break
+            fi
+          fi
+        done
+      fi
+    fi
+    
+    if [ $CSV -eq 0 ] && [ $SKIP_TTL -eq 0 ] && [ "$SOA" = "" ]; then
+      SOA=$(dig_cmd "$DOMAIN SOA")
+      ns_ptr=$(increment_ns_ptr)
+      if [ "$SOA" = "" ]; then
+        >&2 echo "Unable to determine SOA for $DOMAIN"
+        continue
+      fi
+    fi
+    
+    # SOA name servers
+    if [ $add_soa_ns -eq 1 ]; then
+      ns_query=$(dig_cmd "$DOMAIN NS" 1)
+      ns_ptr=$(increment_ns_ptr)
+      if [ "$ns_query" = "" ]; then
+        >&2 echo "Unable to determine name servers [NS] for $DOMAIN"
+        continue
+      fi
+      for record in $ns_query; do
+        if [ "$record" = "" ] || [ "${record:0:1}" = ";" ]; then
+          continue
+        fi
+      
+        if ! [[ "$record" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          if [ "${record: -1}" = "." ]; then
+            record=${record%?}
+          fi
+          ip=$(dig_cmd "$record A" 1 1)
+          ns_ptr=$(increment_ns_ptr)
+          if [ "$ip" = "" ]; then
+            >&2 echo "Unable to determine IP address for name server $record"
+          else
+            domain_name_servers+=($ip)
+          fi
+        else
+          domain_name_servers+=($record)
+        fi
+      done
+    fi
+    ns_count=${#domain_name_servers[@]}
+    if [ $ns_count -eq 0 ]; then
+      >&2 echo "Unable to determine name servers for $DOMAIN"
+      continue
+    fi
+  
+    # dynamic output file
+    OUTPUT=$BASE_OUTPUT
+    if [ $OUTPUT != 'stdout' ]; then
+      OUTPUT=${BASE_OUTPUT//\[domain\]/$DOMAIN}
+      if [ $FIRST_DOMAIN -eq 1 ] || [ "$OUTPUT" != "$BASE_OUTPUT" ]; then
+        rm -f $OUTPUT &>/dev/null
+        if [ -f $OUTPUT ]; then
+          >&2 echo "Output file --output=$OUTPUT already exists and cannot be removed"
+          exit 1
+        fi
+        touch $OUTPUT &>/dev/null
+        if ! [ -f $OUTPUT ]; then
+          >&2 echo "Unable to create output file --output=$OUTPUT"
+          exit 1
+        fi
+      fi
+    fi
+
+    # Zone file header - skipped for CSV
+    if [ $CSV -eq 1 ] && [ $CSV_NO_HEADER -eq 0 ]; then
+      cols='Name,TTL,Record Type,Record Data'
+      if [ $CSV_ADD_DOMAIN -eq 1 ]; then
+        cols="Domain,$cols"
+      fi
+      if ! [ -z $META_COLS ]; then
+        cols="${cols},${META_COLS}"
+      fi
+      # CSV header row
+      if [ $FIRST_DOMAIN -eq 1 ] || [ "$OUTPUT" != "$BASE_OUTPUT" ]; then
+        if [ $OUTPUT = "stdout" ]; then
+          echo $cols
+        else
+          echo $cols >>$OUTPUT
+        fi
+      fi
+    elif [ $CSV -eq 0 ]; then
+      print_to_output "\$ORIGIN $DOMAIN." $DOMAIN 1
+      if [[ $SOA =~ ([0-9]+)[[:blank:]]+[INin]{2}[[:blank:]] ]]; then
+        print_to_output "\$TTL ${BASH_REMATCH[1]}" $DOMAIN 1
+      else
+        print_to_output "\$TTL $DEFAULT_TTL" $DOMAIN 1
+      fi
+    fi
+    FIRST_DOMAIN=0
+
+    # Non brute-force records
+    dig_batch $DOMAIN $rr_types
+    
+    # Determine if wildcard records exist
+    if [ $NO_WILDCARD_CHECK -eq 0 ]; then
+      index_count=${#wildcard_index[@]}
+      wildcard_a+=('')
+      wildcard_aaaa+=('')
+      wildcard_cname+=('')
+      wildcard_index+=($DOMAIN)
+      cname_wildcard=0
+      for type in CNAME A AAAA; do
+        ip=
+        if [ $type = "AAAA" ] && [ $has_aaaa -eq 1 ]; then
+          ip=
+          for ((i = 0; i < $WC_QUERIES; ++i)); do
+            temp=$(dig_cmd "brxfr${RANDOM}.${DOMAIN} AAAA" 1)
+            ns_ptr=$(increment_ns_ptr)
+            if [ "$temp" != "" ]; then
+              ip="$ip $temp"
+            fi
+          done
+        elif [ $type = "A" ] && [ $has_a -eq 1 ]; then
+          ip=
+          for ((i = 0; i < $WC_QUERIES; ++i)); do
+            temp=$(dig_cmd "brxfr${RANDOM}.${DOMAIN} A" 1)
+            ns_ptr=$(increment_ns_ptr)
+            if [ "$temp" != "" ]; then
+              ip="$ip $temp"
+            fi
+          done
+        elif [ $type = "CNAME" ] && [ $has_a -eq 1 ]; then
+          ip=
+          for ((i = 0; i < $WC_QUERIES; ++i)); do
+            temp=$(dig_cmd "brxfr${RANDOM}.${DOMAIN} CNAME" 1)
+            ns_ptr=$(increment_ns_ptr)
+            if [ "$temp" != "" ]; then
+              ip="$temp"
+              break
+            fi
+          done
+        fi
+        
+        if [ "$ip" != "" ]; then
+          qtype=$type
+          if [ $type = "AAAA" ]; then
+            print_verbose "Discovered wildcard AAAA $ip"
+            wildcard_aaaa[$index_count]=$ip
+          elif [ $type = "A" ]; then
+            print_verbose "Discovered wildcard A $ip"
+            if [ $WILDCARD_24 -eq 1 ]; then
+              temp_ip=
+              for ip in $ip; do
+                arr=(`echo ${ip//./ }`)
+                temp_ip="$temp_ip ${arr[0]}.${arr[1]}.${arr[2]}."
+              done
+              ip=$temp_ip
+              print_verbose "Wildcard checks will be based on /24 ranges: $ip"
+            fi
+            tip=
+            tcname=
+            for ip in $ip; do
+              if [[ $ip =~ ^[0-9]+\.[0-9]+\.[0-9]+\. ]]; then
+                tip="$tip $ip"
+              else
+                tcname="$tcname $ip"
+              fi
+            done
+            if [ "$tip" != "" ]; then
+              wildcard_a[$index_count]=$tip
+            fi
+            if [ "$tcname" != "" ]; then
+              wildcard_cname[$index_count]=$tcname
+            fi
+          else
+            print_verbose "Discovered wildcard CNAME $ip"
+            wildcard_cname[$index_count]=$ip
+            qtype=A
+            cname_wildcard=1
+          fi
+          
+          if [ "$type" != "A" ] || [ $cname_wildcard -eq 0 ]; then
+            response=$(dig_cmd "brxfr${RANDOM}.${DOMAIN} $qtype") && if [ "$response" != "" ]; then print_to_output "$response" $DOMAIN 0 1; fi &
+            ns_ptr=$(increment_ns_ptr)
+          fi
+        fi
+      done
+      wait
+    fi
+    
+    # Brute force records
+    words=0
+    while read host; do
+      words=$(( $words + 1 ))
+      if [ $words -ge $dictionary_limit ]; then
+        print_verbose "DICTIONARY_LIMIT $dictionary_limit reached - skipping remaining dictionary words"
+        break
+      fi
+      dig_batch $DOMAIN $rr_br_types $host
+    done <$dictionary
+    
+    # Final batch for this domain
+    dig_batch $DOMAIN
+    
+  done <$DOMAIN
+  
+done
+wait
+rm -f $domain_file
+
+# Remove temporary dictionary file
+if [ "${dictionary:0:10}" = '/tmp/braxfr_' ]; then
+  rm -f $dictionary
+fi
+
