@@ -1,0 +1,6 @@
+*.csv
+dictionaries
+name-servers.txt
+lambda/.build
+lambda/bxfr-lambda.*
+lambda.requirements
